@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manager Panel</title>
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    >
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark px-3">
+    <span class="navbar-brand">Manager Panel</span>
+    <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
+        Logout
+    </a>
+</nav>
+
+<div class="container py-4">
+
+    <h4>Monthly Summary</h4>
+
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card p-3 shadow-sm">
+                <strong>Total Revenue:</strong>
+                <h4>{{ "%.2f"|format(revenue) }}</h4>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card p-3 shadow-sm">
+                <strong>Total Expenses:</strong>
+                <h4>{{ "%.2f"|format(total_expenses) }}</h4>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div
+                class="card p-3 shadow-sm
+                {% if profit >= 0 %}border-success text-success{% else %}border-danger text-danger{% endif %}"
+            >
+                <strong>Profit:</strong>
+                <h4>{{ "%.2f"|format(profit) }}</h4>
+            </div>
+        </div>
+    </div>
+
+    <h5>Expenses</h5>
+    <ul class="list-group mb-4">
+        {% for e in expenses %}
+            <li class="list-group-item d-flex justify-content-between">
+                <span>{{ e.name }}</span>
+                <span>{{ "%.2f"|format(e.amount) }}</span>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <hr>
+
+    <h4>Inventory</h4>
+
+    <table class="table table-striped mt-3">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Stock</th>
+                <th>Capital/unit</th>
+                <th>Selling price</th>
+                <th>Cashier bonus/unit</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for item in items %}
+            <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ item.stock }}</td>
+                <td>{{ "%.2f"|format(item.capital_per_unit) }}</td>
+                <td>{{ "%.2f"|format(item.selling_price) }}</td>
+                <td>{{ "%.2f"|format(item.cashier_bonus) }}</td>
+                <td>
+                    <a href="{{ url_for('manager_delete_item', item_id=item.id) }}"
+                       class="btn btn-sm btn-danger">
+                        Delete
+                    </a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="card p-3 mt-4 shadow-sm">
+        <h5>Add Item</h5>
+        <form method="POST" action="{{ url_for('manager_add_item') }}">
+            <div class="row">
+                <div class="col-md-3">
+                    <input name="name" class="form-control" placeholder="Item name" required>
+                </div>
+                <div class="col-md-2">
+                    <input name="stock" type="number" class="form-control" placeholder="Stock" required>
+                </div>
+                <div class="col-md-2">
+                    <input name="capital" type="number" step="0.01" class="form-control" placeholder="Capital/unit" required>
+                </div>
+                <div class="col-md-2">
+                    <input name="selling" type="number" step="0.01" class="form-control" placeholder="Selling price" required>
+                </div>
+                <div class="col-md-2">
+                    <input name="bonus" type="number" step="0.01" class="form-control" placeholder="Bonus/unit" required>
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-primary w-100">Add</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+</div>
+
+</body>
+</html>

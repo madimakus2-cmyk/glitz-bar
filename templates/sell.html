@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Sell</title>
+</head>
+<body>
+
+<h2>Make a Sale</h2>
+
+<form method="POST">
+
+<select name="item">
+  {% for i in items %}
+    <option value="{{ i.id }}">{{ i.name }} — ₱{{ i.price }}</option>
+  {% endfor %}
+</select>
+
+<br><br>
+
+<input type="number" name="qty" placeholder="Quantity">
+
+<br><br>
+
+<button type="submit">Confirm Sale</button>
+
+</form>
+
+</body>
+</html>

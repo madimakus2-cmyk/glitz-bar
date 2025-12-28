@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Sales Charts</h2>
+
+<h3>Daily Revenue</h3>
+<table>
+<tr><th>Date</th><th>Revenue (₱)</th></tr>
+{% for d, v in daily.items() %}
+<tr>
+  <td>{{ d }}</td>
+  <td>{{ "%.2f"|format(v) }}</td>
+</tr>
+{% endfor %}
+</table>
+
+<br>
+
+<h3>Monthly Revenue</h3>
+<table>
+<tr><th>Month</th><th>Revenue (₱)</th></tr>
+{% for m, v in monthly.items() %}
+<tr>
+  <td>{{ m }}</td>
+  <td>{{ "%.2f"|format(v) }}</td>
+</tr>
+{% endfor %}
+</table>
+
+<a href="/manager">Back</a>
+
+{% endblock %}

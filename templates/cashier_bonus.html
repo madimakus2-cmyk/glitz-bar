@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>Your Bonus</h2>
+
+<table>
+<tr>
+  <th>Date</th>
+  <th>Item</th>
+  <th>Qty</th>
+  <th>Bonus Earned</th>
+</tr>
+
+{% for s in sales %}
+<tr>
+  <td>{{ s.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+  <td>{{ s.item }}</td>
+  <td>{{ s.quantity }}</td>
+  <td>₱{{ "%.2f"|format(s.bonus) }}</td>
+</tr>
+{% endfor %}
+</table>
+
+<h3>Total Bonus: ₱{{ "%.2f"|format(total_bonus) }}</h3>
+
+<a href="/cashier">Back</a>
+
+{% endblock %}

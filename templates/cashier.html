@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cashier Panel</title>
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    >
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark px-3">
+    <span class="navbar-brand">Cashier Panel</span>
+    <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
+        Logout
+    </a>
+</nav>
+
+<div class="container py-4">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="card p-3 shadow-sm mb-4">
+        <h5>Your Total Bonus This Month:</h5>
+        <h3 class="text-primary">{{ "%.2f"|format(total_bonus) }}</h3>
+    </div>
+
+    <h4>Sell Item</h4>
+
+    <div class="card p-3 shadow-sm mb-4">
+        <form method="POST" action="{{ url_for('cashier_sell') }}">
+            <div class="row">
+                <div class="col-md-6">
+                    <select name="item_id" class="form-control" required>
+                        <option value="">Select item</option>
+                        {% for item in items %}
+                            <option value="{{ item.id }}">
+                                {{ item.name }} — Stock: {{ item.stock }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <input
+                        name="quantity"
+                        type="number"
+                        class="form-control"
+                        placeholder="Qty"
+                        min="1"
+                        required
+                    >
+                </div>
+
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100">Sell</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <h4>Sales This Month</h4>
+
+    <table class="table table-striped mt-3">
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Sell price</th>
+                <th>Bonus earned</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in sales %}
+            <tr>
+                <td>{{ s.item_id }}</td>
+                <td>{{ s.quantity }}</td>
+                <td>{{ "%.2f"|format(s.selling_price) }}</td>
+                <td>{{ "%.2f"|format(s.cashier_bonus * s.quantity) }}</td>
+                <td>{{ s.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+</div>
+
+</body>
+</html>

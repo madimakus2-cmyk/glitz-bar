@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sales Logs</title>
+</head>
+<body>
+
+<h2>Sales Logs</h2>
+
+<table border="1" cellpadding="5">
+  <tr>
+    <th>Time</th>
+    <th>Item</th>
+    <th>Qty</th>
+    <th>Selling</th>
+    <th>Capital</th>
+    <th>Bonus</th>
+  </tr>
+
+  {% for s in logs %}
+  <tr>
+    <td>{{ s.ts }}</td>
+    <td>{{ s.item }}</td>
+    <td>{{ s.quantity }}</td>
+    <td>₱{{ s.selling }}</td>
+    <td>₱{{ s.capital }}</td>
+    <td>₱{{ s.bonus }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<br>
+<a href="/manager">Back</a>
+
+</body>
+</html>
