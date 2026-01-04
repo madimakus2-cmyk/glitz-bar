@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h3 class="title">Sales Logs</h3>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Item</th>
+        <th>Qty</th>
+        <th>Total</th>
+        <th>Cashier</th>
+      </tr>
+    </thead>
+
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td>{{ s.timestamp.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ s.item.name }}</td>
+        <td>{{ s.quantity }}</td>
+        <td>₱{{ "%.2f"|format(s.selling_price * s.quantity) }}</td>
+        <td>{{ s.cashier_name }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

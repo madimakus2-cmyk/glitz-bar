@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+
+  <h3 class="title">Daily Report</h3>
+
+  <form method="GET">
+    Date:
+    <input type="date" name="date" value="{{ chosen }}">
+    <button class="btn">View</button>
+  </form>
+
+  <table class="mt-3">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Qty</th>
+        <th>Sales</th>
+        <th>Capital</th>
+        <th>Profit</th>
+      </tr>
+    </thead>
+
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td>{{ s.item.name }}</td>
+        <td>{{ s.quantity }}</td>
+        <td>₱{{ "%.2f"|format(s.selling_price * s.quantity) }}</td>
+        <td>₱{{ "%.2f"|format(s.item.capital_per_unit * s.quantity) }}</td>
+        <td>₱{{ "%.2f"|format((s.selling_price - s.item.capital_per_unit) * s.quantity) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <hr>
+
+  <p><strong>Total Sales:</strong> ₱{{ "%.2f"|format(total_sales) }}</p>
+  <p><strong>Total Capital:</strong> ₱{{ "%.2f"|format(total_capital) }}</p>
+  <p><strong>Gross Profit:</strong> ₱{{ "%.2f"|format(gross_profit) }}</p>
+
+</div>
+
+{% endblock %}

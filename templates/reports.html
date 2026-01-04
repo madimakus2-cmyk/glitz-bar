@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3 class="mb-3">Monthly Reports</h3>
+
+<form class="row g-2 mb-4">
+  <div class="col-auto"><input class="form-control" name="year" value="{{year}}"></div>
+  <div class="col-auto"><input class="form-control" name="month" value="{{month}}" min="1" max="12"></div>
+  <div class="col-auto"><button class="btn btn-dark">View</button></div>
+</form>
+
+<div class="row mb-4">
+  <div class="col-md-4"><div class="card p-3"><b>Profit before expenses</b><div>₱{{"%.2f"|format(profit_before_expenses)}}</div></div></div>
+  <div class="col-md-4"><div class="card p-3"><b>Profit before staff</b><div>₱{{"%.2f"|format(profit_before_staff)}}</div></div></div>
+  <div class="col-md-4"><div class="card p-3"><b>Actual profit</b><div>₱{{"%.2f"|format(actual_profit)}}</div></div></div>
+</div>
+
+<div class="card p-4 mb-4">
+  <h6>Daily Revenue</h6>
+  <canvas id="revChart"></canvas>
+</div>
+
+<div class="card p-4 mb-4">
+  <h6>Best Selling Items (Qty)</h6>
+  <canvas id="itemChart"></canvas>
+</div>
+
+<div class="card p-4">
+  <h6>Profit by Item</h6>
+  <canvas id="profitChart"></canvas>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+new Chart(revChart, {
+  type:"line",
+  data:{labels:{{daily_labels|tojson}},datasets:[{data:{{daily_totals|tojson}},borderWidth:2,tension:.3}]},
+  options:{scales:{y:{suggestedMax:25000}}}
+})
+
+new Chart(itemChart,{
+  type:"bar",
+  data:{labels:{{item_labels|tojson}},datasets:[{data:{{item_qtys|tojson}},borderWidth:1}]}
+})
+
+new Chart(profitChart,{
+  type:"bar",
+  data:{labels:{{item_labels|tojson}},datasets:[{data:{{item_profits|tojson}},borderWidth:1}]},
+  options:{scales:{y:{suggestedMax:25000}}}
+})
+</script>
+
+{% endblock %}

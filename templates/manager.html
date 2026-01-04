@@ -1,122 +1,265 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Manager Panel</title>
-    <link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    >
-</head>
-<body class="bg-light">
+{% extends "base.html" %}
+{% block content %}
 
-<nav class="navbar navbar-dark bg-dark px-3">
-    <span class="navbar-brand">Manager Panel</span>
-    <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
-        Logout
-    </a>
-</nav>
+<style>
+  .box{
+      background:#fff;
+      border:1px solid #ddd;
+      border-radius:18px;
+      padding:20px 22px;
+      margin-bottom:18px;
+      box-shadow:0 6px 14px rgba(0,0,0,.06);
+  }
+  .box-title{
+      margin:0 0 12px 0;
+      font-weight:700;
+  }
+  .positive{ color:#1a7f37; }
+  .negative{ color:#c92a2a; }
 
-<div class="container py-4">
+  .comfy-input{
+      border-radius:14px;
+      padding:10px 12px;
+      border:1px solid #ccc;
+  }
+  .comfy-input:focus{
+      outline:none;
+      border-color:#6ea8fe;
+      box-shadow:0 0 0 2px rgba(110,168,254,.25);
+  }
+  .comfy-btn{
+      border-radius:16px;
+      padding:10px 14px;
+      font-weight:600;
+  }
+</style>
 
-    <h4>Monthly Summary</h4>
+<h2>Manager Dashboard</h2>
+<p>Overview of profits, stocks and sales logs.</p>
 
-    <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card p-3 shadow-sm">
-                <strong>Total Revenue:</strong>
-                <h4>{{ "%.2f"|format(revenue) }}</h4>
-            </div>
-        </div>
+<!-- ================= DATE PICKER ================= -->
+<div style="margin-bottom: 20px;">
+  <form action="{{ url_for('manager') }}" method="GET" style="display:inline-flex; gap:10px; align-items:center;">
+    <label style="font-weight:600;">Select Date:</label>
+    <input type="date" name="date" value="{{ selected_date }}" class="comfy-input" onchange="this.form.submit()">
+  </form>
+</div>
 
-        <div class="col-md-4">
-            <div class="card p-3 shadow-sm">
-                <strong>Total Expenses:</strong>
-                <h4>{{ "%.2f"|format(total_expenses) }}</h4>
-            </div>
-        </div>
+<!-- ================= ADD ITEM ================= -->
+<div class="box">
+  <h4 class="box-title">Add New Item</h4>
 
-        <div class="col-md-4">
-            <div
-                class="card p-3 shadow-sm
-                {% if profit >= 0 %}border-success text-success{% else %}border-danger text-danger{% endif %}"
-            >
-                <strong>Profit:</strong>
-                <h4>{{ "%.2f"|format(profit) }}</h4>
-            </div>
-        </div>
-    </div>
+  <form method="POST" action="{{ url_for('add_item') }}"
+        style="display:grid; gap:10px; grid-template-columns: repeat(3, 1fr);">
 
-    <h5>Expenses</h5>
-    <ul class="list-group mb-4">
-        {% for e in expenses %}
-            <li class="list-group-item d-flex justify-content-between">
-                <span>{{ e.name }}</span>
-                <span>{{ "%.2f"|format(e.amount) }}</span>
-            </li>
-        {% endfor %}
-    </ul>
+      <input class="form-control comfy-input" name="name" placeholder="Item Name" required>
+      <input class="form-control comfy-input" type="number" name="stock" placeholder="Starting Stock" required>
+      <input class="form-control comfy-input" type="number" step="0.01" name="capital" placeholder="Capital Per Unit" required>
+      <input class="form-control comfy-input" type="number" step="0.01" name="price" placeholder="Selling Price" required>
+      <input class="form-control comfy-input" type="number" step="0.01" name="bonus" placeholder="Bonus Per Unit">
 
-    <hr>
+      <button class="btn btn-primary comfy-btn" style="grid-column: span 3;">Save Item</button>
+  </form>
+</div>
 
-    <h4>Inventory</h4>
+<!-- ================= PROFIT BOXES ================= -->
+<div class="box">
+  <h4 class="box-title">Profit Before Expenses</h4>
+  <h1 class="{{ 'positive' if profit_before_expenses >= 0 else 'negative' }}">
+    ₱{{ "%.2f"|format(profit_before_expenses) }}
+  </h1>
+  <span class="text-muted small">Gross income</span>
+</div>
 
-    <table class="table table-striped mt-3">
+<div class="box">
+  <h4 class="box-title">Profit After Expenses</h4>
+  <h1 class="{{ 'positive' if total_profit >= 0 else 'negative' }}">
+    ₱{{ "%.2f"|format(total_profit) }}
+  </h1>
+  <span class="text-muted small">After expenses & bonuses</span>
+</div>
+
+<div class="box">
+  <h4 class="box-title">Profit ({{ selected_date }})</h4>
+  <h1 class="{{ 'positive' if daily_profit >= 0 else 'negative' }}">
+    ₱{{ "%.2f"|format(daily_profit) }}
+  </h1>
+  <span class="text-muted small">Sales for selected date</span>
+</div>
+
+<!-- ================= DAILY STOCK & PROFIT REPORT ================= -->
+<div class="box">
+  <h4 class="box-title">Stock & Profit Report ({{ selected_date }})</h4>
+  <div style="overflow-x:auto;">
+    <table style="width:100%; text-align:left; border-collapse:collapse; font-size:14px;">
         <thead>
-            <tr>
-                <th>Name</th>
-                <th>Stock</th>
-                <th>Capital/unit</th>
-                <th>Selling price</th>
-                <th>Cashier bonus/unit</th>
-                <th></th>
+            <tr style="border-bottom:2px solid #eee; color:#555;">
+                <th style="padding:8px;">Item</th>
+                <th style="padding:8px;">Start</th>
+                <th style="padding:8px;">Now</th>
+                <th style="padding:8px;">Sold</th>
+                <th style="padding:8px;">Sales (Rev)</th>
+                <th style="padding:8px;">Pure Profit</th>
+                <th style="padding:8px;">Total Bonus</th>
+                <th style="padding:8px;">Action</th>
             </tr>
         </thead>
         <tbody>
-        {% for item in items %}
-            <tr>
-                <td>{{ item.name }}</td>
-                <td>{{ item.stock }}</td>
-                <td>{{ "%.2f"|format(item.capital_per_unit) }}</td>
-                <td>{{ "%.2f"|format(item.selling_price) }}</td>
-                <td>{{ "%.2f"|format(item.cashier_bonus) }}</td>
-                <td>
-                    <a href="{{ url_for('manager_delete_item', item_id=item.id) }}"
-                       class="btn btn-sm btn-danger">
-                        Delete
+            {% for d in daily_inventory %}
+            <tr style="border-bottom:1px solid #f9f9f9;">
+                <td style="padding:8px; font-weight:600;">{{ d.name }}</td>
+                <td style="padding:8px;">{{ d.start }}</td>
+                <td style="padding:8px;">{{ d.current }}</td>
+                <td style="padding:8px;">{{ d.sold }}</td>
+                <td style="padding:8px;">₱{{ "%.2f"|format(d.revenue) }}</td>
+                <td style="padding:8px; color: {{ '#1a7f37' if d.pure_profit >= 0 else '#c92a2a' }}">
+                    ₱{{ "%.2f"|format(d.pure_profit) }}
+                </td>
+                <td style="padding:8px;">₱{{ "%.2f"|format(d.bonus) }}</td>
+                <td style="padding:8px;">
+                    <a href="{{ url_for('delete_item', item_id=d.id) }}" 
+                       onclick="return confirm('Delete {{ d.name }}? This cannot be undone.');"
+                       style="color:#c92a2a; text-decoration:none; font-weight:bold;">
+                       Delete
                     </a>
                 </td>
             </tr>
-        {% endfor %}
+            {% endfor %}
         </tbody>
     </table>
-
-    <div class="card p-3 mt-4 shadow-sm">
-        <h5>Add Item</h5>
-        <form method="POST" action="{{ url_for('manager_add_item') }}">
-            <div class="row">
-                <div class="col-md-3">
-                    <input name="name" class="form-control" placeholder="Item name" required>
-                </div>
-                <div class="col-md-2">
-                    <input name="stock" type="number" class="form-control" placeholder="Stock" required>
-                </div>
-                <div class="col-md-2">
-                    <input name="capital" type="number" step="0.01" class="form-control" placeholder="Capital/unit" required>
-                </div>
-                <div class="col-md-2">
-                    <input name="selling" type="number" step="0.01" class="form-control" placeholder="Selling price" required>
-                </div>
-                <div class="col-md-2">
-                    <input name="bonus" type="number" step="0.01" class="form-control" placeholder="Bonus/unit" required>
-                </div>
-                <div class="col-md-1">
-                    <button class="btn btn-primary w-100">Add</button>
-                </div>
-            </div>
-        </form>
-    </div>
-
+  </div>
 </div>
 
-</body>
-</html>
+<!-- ================= RESTOCK ================= -->
+<div class="box">
+  <h4 class="box-title">Restock Items</h4>
+
+  <form method="POST" action="{{ url_for('restock_item') }}"
+        style="display:grid; gap:10px; grid-template-columns: repeat(3, 1fr);">
+
+      <select class="form-control comfy-input" name="item_id" required>
+        <option value="" disabled selected>Select item</option>
+        {% for i in items %}
+          <option value="{{ i.id }}">{{ i.name }}</option>
+        {% endfor %}
+      </select>
+
+      <input class="form-control comfy-input" type="number" name="quantity" placeholder="Quantity Added" required>
+      <input class="form-control comfy-input" type="text" name="note" placeholder="Note (optional)">
+
+      <button class="btn btn-success comfy-btn" style="grid-column: span 3;">
+        Restock
+      </button>
+  </form>
+</div>
+
+<!-- ================= SELL LOGS ================= -->
+<div class="box">
+  <h4 class="box-title"> Sell Logs ({{ selected_date }})</h4>
+
+  {% if sell_logs %}
+    {% for s in sell_logs %}
+        <div style="font-size:13px; margin-bottom:6px;">
+        <strong>{{ s.item.name if s.item else "Deleted Item" }}</strong> —
+        {{ s.timestamp.strftime("%H:%M") }}
+        — {{ s.quantity }} pcs —
+        ₱{{ "%.2f"|format(s.selling_price * s.quantity) }}
+        <a href="{{ url_for('delete_sale', sale_id=s.id) }}"
+            onclick="return confirm('Undo this sale?');">Undo</a>
+        </div>
+    {% endfor %}
+  {% else %}
+    <p class="text-muted small">No sales found for this date.</p>
+  {% endif %}
+</div>
+
+<!-- ================= RESTOCK LOGS ================= -->
+<div class="box">
+  <h4 class="box-title">Restock Logs ({{ selected_date }})</h4>
+
+  {% if restock_logs %}
+    {% for r in restock_logs %}
+      <div style="font-size:13px; margin-bottom:6px;">
+        <strong>{{ r.item.name if r.item else "Deleted Item" }}</strong> —
+        {{ r.timestamp.strftime("%H:%M") }}
+        — Added {{ r.quantity }}
+        {% if r.note %} — <em>{{ r.note }}</em>{% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+      <p class="text-muted small">No restocks yet.</p>
+  {% endif %}
+</div>
+
+<!-- ================= NEEDED STOCKS + MOST BOUGHT ================= -->
+<div class="box">
+  <h4 class="box-title"> Needed Stocks (≤ 10)</h4>
+
+  {% if needed_items %}
+      <ul>
+        {% for i in needed_items %}
+          <li>{{ i.name }} — <span class="negative">{{ i.stock }} left</span></li>
+        {% endfor %}
+      </ul>
+  {% else %}
+      <p>Everything looks good</p>
+  {% endif %}
+
+  <hr>
+
+  <h4 class="box-title" style="margin-top:15px;">Most Bought ({{ month_name }})</h4>
+  {% if most_bought %}
+      <ol style="padding-left: 20px; margin-bottom: 0;">
+        {% for name, qty in most_bought %}
+          <li><strong>{{ name }}</strong> — {{ qty }} sold</li>
+        {% endfor %}
+      </ol>
+  {% else %}
+      <p class="text-muted small">No sales recorded for this month.</p>
+  {% endif %}
+
+<!-- ================= SOLD CHART SCRIPT ================= -->
+<script>
+const salesData = {{ sales_chart | tojson }};
+
+const soldTotals = {};
+salesData.forEach(s => {
+    if (!soldTotals[s.item]) soldTotals[s.item] = 0;
+    soldTotals[s.item] += s.qty;
+});
+
+const soldLabels = Object.keys(soldTotals);
+const soldValues = Object.values(soldTotals);
+
+new Chart(document.getElementById("soldChart"), {
+    type: "bar",
+    data: {
+        labels: soldLabels,
+        datasets: [{
+            label: "Total Sold (pcs)",
+            data: soldValues
+        }]
+    }
+});
+</script>
+
+<!-- ✅ ADDED: sync Start / End values from server -->
+<script>
+fetch("{{ url_for('stock_report') }}")
+  .then(r => r.json())
+  .then(data => {
+    data.forEach(item => {
+      const row = [...document.querySelectorAll("table tr")]
+        .find(tr => tr.children[0] && tr.children[0].innerText.trim() === item.name);
+
+      if (!row) return;
+
+      row.children[2].innerText = item.start_stock;
+      row.children[3].innerText = item.end_stock;
+      row.children[4].innerText = item.sold;
+    });
+  })
+  .catch(() => console.log("Stock report fetch failed"));
+</script>
+
+{% endblock %}

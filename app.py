@@ -1,95 +1,92 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, redirect, request, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-import os
+from datetime import datetime, date
+from sqlalchemy import func
 
 app = Flask(__name__)
-app.secret_key = "secret123"
-
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///store.db"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
+app.secret_key = "secret"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///glitz.db"
 db = SQLAlchemy(app)
 
 
-# --------------------
-# MODELS
-# --------------------
+@app.context_processor
+def inject_time_helpers():
+    return dict(date=date, datetime=datetime)
+
+
+# ---------------------- MODELS ----------------------
+
 class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
     stock = db.Column(db.Integer, default=0)
-    capital_per_unit = db.Column(db.Float, nullable=False)
-    selling_price = db.Column(db.Float, nullable=False)
-    cashier_bonus = db.Column(db.Float, default=0.0)   # custom peso bonus per unit
+    capital_per_unit = db.Column(db.Float, default=0)
+    selling_price = db.Column(db.Float, default=0)
+    cashier_bonus = db.Column(db.Float, default=0)
 
 
 class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"))
-    quantity = db.Column(db.Integer, nullable=False)
-    selling_price = db.Column(db.Float, nullable=False)
-    capital_per_unit = db.Column(db.Float, nullable=False)
-    cashier_bonus = db.Column(db.Float, nullable=False)
+    quantity = db.Column(db.Integer)
+    selling_price = db.Column(db.Float)
+    cashier_name = db.Column(db.String(120))
+    bonus_total = db.Column(db.Float, default=0)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+    item = db.relationship("Item")
 
 
 class Expense(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100))
-    amount = db.Column(db.Float, nullable=False)
-    month = db.Column(db.String(20), nullable=False)   # YYYY-MM
+    description = db.Column(db.String(200))
+    amount = db.Column(db.Float)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-# --------------------
-# CREATE DB + DEFAULT EXPENSES
-# --------------------
-with app.app_context():
-    db.create_all()
+# ---------------------- RESTOCK LOG MODEL ----------------------
+class Restock(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"))
+    quantity = db.Column(db.Integer)
+    note = db.Column(db.String(200))            # <-- added
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-    now = datetime.utcnow()
-    current_month = f"{now.year}-{now.month:02d}"
-
-    default_expenses = {
-        "Electricity": 6000,
-        "Water": 1000,
-        "Rent": 25000,
-        "BIR tax": 900,
-        "Munisipyo": 1000,
-    }
-
-    for name, amt in default_expenses.items():
-        exists = Expense.query.filter_by(name=name, month=current_month).first()
-        if not exists:
-            db.session.add(Expense(name=name, amount=amt, month=current_month))
-
-    db.session.commit()
+    item = db.relationship("Item")
 
 
-# --------------------
-# LOGIN
-# --------------------
-@app.route("/")
-def index():
-    return redirect(url_for("login"))
+# ---------------------- FIXED MONTHLY EXPENSES ----------------------
+
+MONTHLY_EXPENSES = {
+    "Electricity": 6000,
+    "Water": 1000,
+    "Rent": 25000,
+    "BIR Tax": 900,
+    "Municipality": 1000,
+}
+
+def get_total_monthly_expenses():
+    return sum(MONTHLY_EXPENSES.values())
 
 
-@app.route("/login", methods=["GET", "POST"])
+# ---------------------- LOGIN ----------------------
+
+@app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
+        role = request.form.get("role")
+        password = request.form.get("password")
 
-        if username == "manager" and password == "MarlaSchr":
-            session["role"] = "manager"
-            return redirect(url_for("manager_panel"))
+        valid_passwords = {"staff": "1234", "manager": "MarlaSchr"}
 
-        if username == "cashier" and password == "Glitz":
-            session["role"] = "cashier"
-            return redirect(url_for("cashier_panel"))
+        if role not in valid_passwords or password != valid_passwords[role]:
+            flash("Incorrect password.")
+            return redirect(url_for("login"))
 
-        flash("Invalid credentials", "danger")
-        return redirect(url_for("login"))
+        session["role"] = role
+        session["user"] = "cashier" if role == "staff" else "manager"
+
+        return redirect(url_for("cashier" if role == "staff" else "manager"))
 
     return render_template("login.html")
 
@@ -100,132 +97,3412 @@ def logout():
     return redirect(url_for("login"))
 
 
-# --------------------
-# MANAGER PANEL
-# --------------------
+# ---------------------- DASHBOARD REDIRECT ----------------------
+
+@app.route("/dashboard")
+def dashboard():
+    if session.get("role") == "staff":
+        return redirect(url_for("cashier"))
+    return redirect(url_for("manager"))
+
+
+# ---------------------- MANAGER PANEL ----------------------
+
 @app.route("/manager")
-def manager_panel():
-    if session.get("role") != "manager":
-        return redirect(url_for("login"))
+def manager():
+    # 1. Handle Date Selection (Default to Today)
+    date_str = request.args.get("date")
+    if date_str:
+        selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    else:
+        selected_date = date.today()
+        date_str = selected_date.isoformat()
 
     items = Item.query.all()
+    
+    # 2. Filter Logs for the Selected Date
+    sales_selected = Sale.query.filter(func.date(Sale.timestamp) == selected_date).order_by(Sale.timestamp.desc()).all()
 
-    now = datetime.utcnow()
-    month = f"{now.year}-{now.month:02d}"
+    sales_for_chart = [
+        {
+            "item": s.item.name if s.item else "Deleted Item",
+            "qty": s.quantity,
+            "timestamp": s.timestamp.strftime("%Y-%m-%d"),
+        }
+        for s in sales_selected
+    ]
 
-    expenses = Expense.query.filter_by(month=month).all()
-    total_expenses = sum(e.amount for e in expenses)
+    current_month_str = date.today().strftime("%Y-%m")
 
-    sales = Sale.query.filter(
-        db.extract("year", Sale.timestamp) == now.year,
-        db.extract("month", Sale.timestamp) == now.month,
+    sales_month = Sale.query.filter(
+        func.strftime("%Y-%m", Sale.timestamp) == current_month_str
     ).all()
 
-    revenue = sum(s.selling_price * s.quantity for s in sales)
-    profit = revenue - total_expenses
+    total_sales_amount = sum(s.selling_price * s.quantity for s in sales_month)
+    total_capital = sum((s.item.capital_per_unit * s.quantity) for s in sales_month if s.item)
+    profit_before_expenses = total_sales_amount - total_capital
+
+    db_expenses_total = sum(e.amount for e in Expense.query.filter(
+        func.strftime("%Y-%m", Expense.timestamp) == current_month_str
+    ).all())
+    fixed_expenses_total = get_total_monthly_expenses()
+    bonus_expenses_total = sum(s.bonus_total for s in sales_month)
+
+    expenses_total = db_expenses_total + fixed_expenses_total + bonus_expenses_total
+    total_profit = profit_before_expenses - expenses_total
+
+    # 3. Calculate Stats for Selected Date
+    date_sales = sales_selected  # Already filtered above
+    daily_sales = sum(s.selling_price * s.quantity for s in date_sales)
+    daily_capital = sum((s.item.capital_per_unit * s.quantity) for s in date_sales if s.item)
+    daily_profit = daily_sales - daily_capital
+
+    # ---------------- NEW: Daily Inventory & Profit Report ----------------
+    date_restocks = Restock.query.filter(func.date(Restock.timestamp) == selected_date).all()
+    
+    daily_inventory = []
+    for i in items:
+        # Filter lists for this item
+        s_list = [s for s in date_sales if s.item_id == i.id]
+        r_list = [r for r in date_restocks if r.item_id == i.id]
+        
+        sold_qty = sum(s.quantity for s in s_list)
+        added_qty = sum(r.quantity for r in r_list)
+        
+        revenue = sum(s.selling_price * s.quantity for s in s_list)
+        cost = i.capital_per_unit * sold_qty
+        bonus = sum(s.bonus_total for s in s_list)
+        
+        daily_inventory.append({
+            "id": i.id,
+            "name": i.name,
+            "start": i.stock + sold_qty - added_qty, # Back-calculate start stock
+            "current": i.stock,
+            "sold": sold_qty,
+            "revenue": revenue,               # Profit before capital & bonus
+            "pure_profit": revenue - cost - bonus, # Pure profit (Net)
+            "bonus": bonus
+        })
+
+    needed_items = [i for i in items if i.stock < 10]
+
+    most_bought = (
+        db.session.query(Item.name, func.sum(Sale.quantity).label("qty"))
+        .join(Sale, Sale.item_id == Item.id)
+        .filter(func.strftime("%Y-%m", Sale.timestamp) == selected_date.strftime("%Y-%m"))
+        .group_by(Item.id)
+        .order_by(func.sum(Sale.quantity).desc())
+        .limit(10)
+        .all()
+    )
+
+    # restock logs
+    restock_logs = Restock.query.filter(func.date(Restock.timestamp) == selected_date).order_by(Restock.timestamp.desc()).all()
 
     return render_template(
         "manager.html",
+        selected_date=date_str,
+        month_name=selected_date.strftime("%B"),
         items=items,
-        expenses=expenses,
-        revenue=revenue,
-        profit=profit,
-        total_expenses=total_expenses,
+        sales_chart=sales_for_chart,
+        sell_logs=sales_selected,
+        total_sales_amount=total_sales_amount,
+        expenses_total=expenses_total,
+        total_profit=total_profit,
+        profit_before_expenses=profit_before_expenses,
+        daily_profit=daily_profit,
+        monthly_expenses=MONTHLY_EXPENSES,
+        needed_items=needed_items,
+        most_bought=most_bought,
+        daily_inventory=daily_inventory,    # <-- Passed to template
+        restock_logs=restock_logs,          # <-- matches template
     )
 
 
-@app.route("/manager/add_item", methods=["POST"])
-def manager_add_item():
-    if session.get("role") != "manager":
-        return redirect(url_for("login"))
 
-    name = request.form["name"]
-    stock = int(request.form["stock"])
-    capital = float(request.form["capital"])
-    selling = float(request.form["selling"])
-    bonus = float(request.form["bonus"])
 
-    db.session.add(
-        Item(
-            name=name,
-            stock=stock,
-            capital_per_unit=capital,
-            selling_price=selling,
-            cashier_bonus=bonus,
-        )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------- ITEMS ----------------------
+
+@app.route("/add_item", methods=["POST"])
+def add_item():
+    item = Item(
+        name=request.form["name"],
+        stock=int(request.form["stock"]),
+        capital_per_unit=float(request.form["capital"]),
+        selling_price=float(request.form["price"]),
+        cashier_bonus=float(request.form.get("bonus") or 0),
     )
+    db.session.add(item)
     db.session.commit()
+    flash("Item added.")
+    return redirect(url_for("manager"))
 
-    return redirect(url_for("manager_panel"))
 
-
-@app.route("/manager/delete_item/<int:item_id>")
-def manager_delete_item(item_id):
-    if session.get("role") != "manager":
-        return redirect(url_for("login"))
-
-    item = Item.query.get_or_404(item_id)
-    db.session.delete(item)
+# (kept your old restock endpoints — still usable)
+@app.route("/restock/<int:item_id>", methods=["POST"])
+def restock(item_id):
+    item = Item.query.get(item_id)
+    item.stock += int(request.form["amount"])
     db.session.commit()
-
-    return redirect(url_for("manager_panel"))
-
-
-# --------------------
-# CASHIER PANEL
-# --------------------
-@app.route("/cashier")
-def cashier_panel():
-    if session.get("role") != "cashier":
-        return redirect(url_for("login"))
-
-    items = Item.query.all()
-
-    now = datetime.utcnow()
-    month = now.month
-    year = now.year
-
-    sales = Sale.query.filter(
-        db.extract("year", Sale.timestamp) == year,
-        db.extract("month", Sale.timestamp) == month,
-    ).all()
-
-    total_bonus = sum(s.cashier_bonus * s.quantity for s in sales)
-
-    return render_template(
-        "cashier.html", items=items, sales=sales, total_bonus=total_bonus
-    )
+    flash("Stock updated.")
+    return redirect(url_for("manager"))
 
 
-@app.route("/cashier/sell", methods=["POST"])
-def cashier_sell():
-    if session.get("role") != "cashier":
-        return redirect(url_for("login"))
-
+# ---------------------- NEW: unified comfy restock ----------------------
+@app.route("/restock_item", methods=["POST"])
+def restock_item():
     item_id = int(request.form["item_id"])
     qty = int(request.form["quantity"])
+    note = request.form.get("note")
 
-    item = Item.query.get_or_404(item_id)
+    item = Item.query.get(item_id)
+    item.stock += qty
 
-    if item.stock < qty:
-        flash("Not enough stock!", "danger")
-        return redirect(url_for("cashier_panel"))
+    log = Restock(item_id=item_id, quantity=qty, note=note)
+    db.session.add(log)
 
-    sale = Sale(
-        item_id=item.id,
-        quantity=qty,
-        selling_price=item.selling_price,
-        capital_per_unit=item.capital_per_unit,
-        cashier_bonus=item.cashier_bonus,
-    )
+    db.session.commit()
+    flash("Restock recorded.")
+    return redirect(url_for("manager"))
+
+
+@app.route("/delete_item/<int:item_id>")
+def delete_item(item_id):
+    db.session.delete(Item.query.get(item_id))
+    db.session.commit()
+    flash("Item removed.")
+    return redirect(url_for("manager"))
+
+
+# ---------------------- SALES ----------------------
+
+@app.route("/cashier")
+def cashier():
+    items = Item.query.all()
+    sales_today = Sale.query.filter(func.date(Sale.timestamp) == date.today()).all()
+    total_bonus = sum(s.bonus_total for s in sales_today)
+
+    return render_template("cashier.html", items=items, total_bonus=total_bonus)
+
+
+@app.route("/sell/<int:item_id>", methods=["POST"])
+def sell(item_id):
+    item = Item.query.get(item_id)
+    qty = int(request.form["quantity"])
+
+    if qty > item.stock:
+        flash("Not enough stock.")
+        return redirect(url_for("cashier"))
 
     item.stock -= qty
+
+    sale = Sale(
+        item_id=item_id,
+        quantity=qty,
+        selling_price=item.selling_price,
+        cashier_name=session.get("user", "Staff"),
+        bonus_total=item.cashier_bonus * qty,
+    )
 
     db.session.add(sale)
     db.session.commit()
 
-    return redirect(url_for("cashier_panel"))
+    flash("Sale recorded.")
+    return redirect(url_for("cashier"))
 
+
+@app.route("/delete_sale/<int:sale_id>")
+def delete_sale(sale_id):
+    sale = Sale.query.get(sale_id)
+    if not sale:
+        flash("Sale not found.")
+        return redirect(url_for("manager"))
+
+    if sale.item:
+        sale.item.stock += sale.quantity
+    db.session.delete(sale)
+    db.session.commit()
+
+    flash("Sale undone and bonus reverted.")
+    return redirect(url_for("manager"))
+
+
+# ---------------------- LOGS ----------------------
+
+@app.route("/logs")
+def logs():
+    sales = Sale.query.order_by(Sale.timestamp.desc()).all()
+    return render_template("logs.html", sales=sales)
+
+
+# ---------------------- DAILY REPORT ----------------------
+
+@app.route("/daily_report")
+def daily_report():
+    chosen = request.args.get("date") or date.today().isoformat()
+    sales = Sale.query.filter(func.date(Sale.timestamp) == chosen).all()
+
+    total_sales = sum(s.selling_price * s.quantity for s in sales)
+    total_capital = sum((s.item.capital_per_unit * s.quantity) for s in sales if s.item)
+    gross_profit = total_sales - total_capital
+
+    return render_template(
+        "daily_report.html",
+        chosen=chosen,
+        sales=sales,
+        total_sales=total_sales,
+        total_capital=total_capital,
+        gross_profit=gross_profit,
+    )
+
+
+# ---------------------- STOCK REPORT ----------------------
+
+@app.route("/stock_report")
+def stock_report():
+    today = date.today()
+    items = Item.query.all()
+    report = []
+
+    for item in items:
+        sales_today = Sale.query.filter(
+            Sale.item_id == item.id,
+            func.date(Sale.timestamp) == today
+        ).all()
+
+        sold_qty = sum(s.quantity for s in sales_today)
+
+        start_stock = item.stock + sold_qty
+        end_stock = item.stock
+
+        revenue = sum(s.selling_price * s.quantity for s in sales_today)
+        cost = sum(item.capital_per_unit * s.quantity for s in sales_today)
+        profit = revenue - cost
+        cashier_bonus = sum(item.cashier_bonus * s.quantity for s in sales_today)
+
+        report.append({
+            "name": item.name,
+            "price": item.selling_price,
+            "start": start_stock,
+            "end": end_stock,
+            "sold": sold_qty,
+            "profit": profit,
+            "bonus": cashier_bonus,
+            "is_positive": profit >= 0
+        })
+
+    return render_template("stock_report.html", report=report)
+
+
+# ---------------------- MAIN ----------------------
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)

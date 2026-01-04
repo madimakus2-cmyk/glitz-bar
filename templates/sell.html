@@ -1,29 +1,127 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html>
 <head>
-<title>Sell</title>
+<title>Make a Sale</title>
+<meta charset="utf-8">
+
+<style>
+  body {
+    background: #f6efe8;
+    font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    color: #3a2f2a;
+    display: flex;
+    justify-content: center;
+    padding: 40px;
+  }
+
+  .card {
+    background: #fffdfb;
+    border-radius: 18px;
+    box-shadow: 0 12px 26px rgba(0,0,0,.06);
+    padding: 28px 32px;
+    max-width: 520px;
+    width: 100%;
+  }
+
+  h2 {
+    margin-top: 0;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+  label {
+    font-size: 14px;
+    opacity: .85;
+  }
+
+  select, input {
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #e4dcd3;
+    background: #fffcf9;
+    transition: border .2s, box-shadow .2s;
+  }
+
+  select:focus, input:focus {
+    outline: none;
+    border-color: #d4bca8;
+    box-shadow: 0 0 0 2px rgba(212,188,168,.25);
+  }
+
+  button {
+    margin-top: 18px;
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 12px;
+    background: #d7b49e;
+    color: #2c221c;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .25s, transform .1s;
+  }
+
+  button:hover { background: #c9a28a; }
+  button:active { transform: scale(.98); }
+
+  .messages {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+
+  .messages.success { background: #e9f6e9; color: #2e6a2e; }
+  .messages.error   { background: #fdecec; color: #7d2222; }
+</style>
 </head>
+
 <body>
+<div class="card">
 
 <h2>Make a Sale</h2>
 
-<form method="POST">
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, msg in messages %}
+      <div class="messages {{ category }}">{{ msg }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
 
-<select name="item">
-  {% for i in items %}
-    <option value="{{ i.id }}">{{ i.name }} — ₱{{ i.price }}</option>
-  {% endfor %}
-</select>
+<form method="POST" action="">
+  {{ csrf_token() }}
 
-<br><br>
+  <label for="item">Item</label>
+  <select id="item" name="item" required>
+    <option value="" disabled selected>Select an item</option>
+    {% for i in items %}
+      <option value="{{ i.id }}"
+        {% if request.form.item == i.id|string %}selected{% endif %}
+      >
+        {{ i.name }} — ₱{{ "%.2f"|format(i.price) }}
+      </option>
+    {% endfor %}
+  </select>
 
-<input type="number" name="qty" placeholder="Quantity">
+  <br><br>
 
-<br><br>
+  <label for="qty">Quantity</label>
+  <input
+    id="qty"
+    type="number"
+    name="qty"
+    min="1"
+    step="1"
+    required
+    placeholder="How many?"
+    value="{{ request.form.qty }}"
+  >
 
-<button type="submit">Confirm Sale</button>
-
+  <button type="submit">Confirm Sale</button>
 </form>
 
+</div>
 </body>
 </html>
